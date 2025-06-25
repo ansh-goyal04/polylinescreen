@@ -3,11 +3,18 @@ import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import MapView, { Polyline, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 
-export default function App() {
+ const PolylineScreen=()=> {
   const [routeCoordinates, setRouteCoordinates] = useState([]);
-  const [region, setRegion] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
   const mapRef = useRef(null);
-  const [zoom, setZoom] = useState(0.01); 
+  const [zoom, setZoom] = useState(0.01);
+
+  // Threshold filter to avoid GPS jitter
+  const isSignificantMove = (prev, next, threshold = 0.00005) => {
+    const latDiff = Math.abs(prev.latitude - next.latitude);
+    const lonDiff = Math.abs(prev.longitude - next.longitude);
+    return latDiff > threshold || lonDiff > threshold;
+  };
 
   useEffect(() => {
     (async () => {
@@ -22,53 +29,60 @@ export default function App() {
         },
         (location) => {
           const { latitude, longitude } = location.coords;
-          const newRegion = {
-            latitude,
-            longitude,
-            latitudeDelta: zoom,
-            longitudeDelta: zoom,
-          };
+          const newPoint = { latitude, longitude };
 
-          setRouteCoordinates((prev) => [...prev, { latitude, longitude }]);
-          setRegion(newRegion);
+          setCurrentLocation(newPoint);
 
-          if (mapRef.current) {
-            mapRef.current.animateToRegion(newRegion, 500);
-          }
+          setRouteCoordinates((prev) => {
+            if (prev.length === 0 || isSignificantMove(prev[prev.length - 1], newPoint)) {
+              return [...prev, newPoint];
+            }
+            return prev;
+          });
         }
       );
 
       return () => subscription.remove();
     })();
-  }, [zoom]);
+  }, []);
 
   const handleZoom = (type) => {
     const newZoom = type === 'in' ? zoom / 2 : zoom * 2;
     setZoom(newZoom);
+
+    if (currentLocation && mapRef.current) {
+      const region = {
+        ...currentLocation,
+        latitudeDelta: newZoom,
+        longitudeDelta: newZoom,
+      };
+      mapRef.current.animateToRegion(region, 500);
+    }
   };
 
-  const recenter = async () => {
-    const location = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = location.coords;
-    const newRegion = {
-      latitude,
-      longitude,
-      latitudeDelta: zoom,
-      longitudeDelta: zoom,
-    };
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(newRegion, 500);
+  const recenter = () => {
+    if (currentLocation && mapRef.current) {
+      const region = {
+        ...currentLocation,
+        latitudeDelta: zoom,
+        longitudeDelta: zoom,
+      };
+      mapRef.current.animateToRegion(region, 500);
     }
   };
 
   return (
     <View style={styles.container}>
-      {region && (
+      {currentLocation && (
         <>
           <MapView
             ref={mapRef}
             style={styles.map}
-            initialRegion={region}
+            initialRegion={{
+              ...currentLocation,
+              latitudeDelta: zoom,
+              longitudeDelta: zoom,
+            }}
             showsCompass={true}
             showsUserLocation={true}
           >
@@ -78,7 +92,6 @@ export default function App() {
             )}
           </MapView>
 
-          
           <View style={styles.zoomControls}>
             <TouchableOpacity style={styles.zoomBtn} onPress={() => handleZoom('in')}>
               <Text style={styles.zoomText}>+</Text>
@@ -88,7 +101,6 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          
           <TouchableOpacity style={styles.recenterBtn} onPress={recenter}>
             <Text style={styles.recenterText}>📍</Text>
           </TouchableOpacity>
@@ -97,7 +109,7 @@ export default function App() {
     </View>
   );
 }
-
+export default PolylineScreen
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
